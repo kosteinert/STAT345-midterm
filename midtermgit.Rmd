@@ -1,0 +1,459 @@
+---
+title: "STAT 345 Midterm Project"
+author: "Kimmy Steinert"
+date: "Due April 9th (9:55 am)"
+output:
+  word_document: default
+  pdf_document: default
+  html_document: default
+font: 12pt 
+---
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(eval = FALSE)
+```
+
+> "NOBODY KNOWS ANYTHING. Not one person in the entire motion picture field knows for a certainty what’s going to work. Every time out it’s a guess—and, if you’re lucky, an educated one." William Goldman, _Adventures in the Screen Trade_
+
+# Modified for git assignment!! 
+
+Your data for the midterm project consists of the 1000 highest rated movies on the Internet Movie Database (IMDB). You can find the first 50 movies [here](https://www.imdb.com/search/title/?groups=top_1000&start=1), with navigational links to the other 950 movies. 
+
+Each IMDB page records a large amount of information about each movie. We are interested in the following:
+
+   * The average rating of the movie by IMDB users. 
+   * The number of ratings of the movie. 
+   * The year the movie was released. 
+   * The gross revenue of the movie (US).
+   * The budget for the movie.
+   * The movie's title.
+   * The movie’s genre(s). 
+   * The four top-billed actors.
+   * The text of the 25 "most helpful" reviews, as well as their helpfulness (ratio of helpful votes out of total votes.) 
+    
+Note that the first five (and last) variables are numeric, and the genre, title, and reviews are strings. In some cases, some of these variables may be missing for a particular movie. 
+
+In some cases, the business information page lists multiple gross revenues, depending on the country, or gross receipts by different dates. In case of ambiguity, we are interested in gross receipts for the US, and want to use the figure for the latest available date. If no gross revenue figure is available for the US, treat the gross revenue as missing.
+
+**General advice:** Get started on this one early. If you wait to the last minute, it will not go well. 
+
+1. (30 pts) Write code to extract the variables described above from all 1000 movies, and store it in a data frame. For full credit, you should write a function which can extract this information from an arbitrary movie code (or url), and then further code which uses that function and applies it to all 1000 movies. For full credit, your code should avoid loops in favor of vectorized operations and apply (and sapply, lapply, etc., as convenient). Your code should handle missing values appropriately, and should not convert categorical variables into numbers, or numbers into strings, etc. 
+
+```{r}
+library(rvest) # Package used for web scraping 
+library(tidyverse)
+library(stringr) 
+library(dplyr)
+library(ggplot2)
+```
+
+
+```{r}
+# IMBD url from the browser to view the imbd website. 
+url <- "https://www.imdb.com/search/title/?groups=top_1000&start=1"
+h <- read_html(url)
+
+# Extracting movie urls 
+movie_link <- html_nodes(h, ".lister-item-header a")
+movie_text <- html_attr(movie_link, "href") %>% str_replace("\\?ref_=adv_li_tt", "")
+head(movie_text)
+
+# Converting movie urls to full links
+full_movielink <- paste0("https://www.imdb.com", movie_text)
+head(full_movielink)
+movieurl <- read_html(full_movielink[1])
+
+# Extracting movie titles, checking characters
+movie_titles <- html_text(movie_link)
+class(movie_titles) 
+
+# Average rating of movies by IMDB users
+movie_rating <- html_nodes(movieurl, ".ratings-imdb-rating strong")
+movie_rating <- html_text(movie_rating) 
+
+# Year of movie release, address missing values with trim 
+release_year <- html_nodes(movieurl, ".text-muted.unbold")
+release_year <- html_text(release_year, trim = TRUE) 
+
+# Gross revenue of the movie (US), address missing values with trim
+gross_revenue <- html_nodes(movieurl, ".text-muted+ span")
+gross_revenue <- html_text(gross_revenue, trim = TRUE)
+
+# Movie genre(s), use trim to take out \n and extra spaces
+movie_genre <- html_nodes(movieurl, ".genre")
+movie_genre <- html_text(movie_genre, trim = TRUE)
+
+# 4 top-billed actors
+top_actors <- html_nodes(movieurl, ".lister-item-content .ghost+ a")
+top_actors <- html_text(top_actors, trim = TRUE)
+
+# Links to review pages
+review_url <- paste0(full_movielink, "reviews")
+head(review_url)
+reviewpage <- read_html(review_url[1])
+review_text <- html_nodes(reviewpage, ".text") 
+review_text <- html_text(review_text)
+head(review_text)
+
+#Helpfulness Ratios
+review_helpfulness <- html_nodes(reviewpage, ".text-muted") %>% html_text %>% str_extract_all("(\\d,)?\\d+") %>% unlist %>% parse_number
+length(review_helpfulness) <- 50
+head(review_helpfulness) #good up to here 
+# Creating the ratios
+help_combined <- matrix(review_helpfulness, ncol = 2, byrow = TRUE)
+hratios <- help_combined[,1] / help_combined[,2]
+hratios
+
+# Budget - not complete
+budget_url <- paste0(full_movielink, "?ref_=adv_li_tt")
+budgetlink <- read_html(budget_url[1])
+movie_budget <- html_nodes(budgetlink,"#titleDetails .txt-block:nth-child(12)")
+movie_budget <- html_text(movie_budget, trim = TRUE)
+if(length(movie_budget)==0) movie_budget <- NA
+
+budgetdf <- map_df(.x = movie_budget, .f=getmovie)
+avengers <-  getmovie %>%
+   filter(movie_titles = "Avengers: Endgame")
+avengers
+```
+
+```{r}
+getmovie <- function(url){ 
+   url <- "https://www.imdb.com/search/title/?groups=top_1000&start=1"
+   h <- read_html(url)
+   url[i] <- str_c("imdb.com/search/title/?groups=top_1000&start=",(i-1)*50+1 ,"&ref_=adv_nxt", sep="") # All 1000 movies
+   movie_link <- html_nodes(h, ".lister-item-header a")
+   movie_text <- html_attr(movie_link, "href") %>% str_replace("\\?ref_=adv_li_tt", "")
+   full_movielink <- paste0("https://www.imdb.com", movie_text)
+   movieurl <- read_html(full_movielink[1])
+   movie_titles <- html_text(movie_link)
+#Variables
+   movie_rating <- html_nodes(movieurl, ".ratings-imdb-rating strong") %>% html_text
+   release_year <- html_nodes(movieurl, ".text-muted.unbold") %>% html_text(trim = TRUE)
+   gross_revenue <- html_nodes(movieurl, ".text-muted+ span") %>% html_text(trim = TRUE)
+   movie_genre <- html_nodes(movieurl, ".genre") %>% html_text(trim = TRUE)
+   top_actors <- html_nodes(movieurl, ".lister-item-content .ghost+ a") %>% html_text(trim = TRUE) 
+   length(top_actors) <- 4
+#Reviews & Helpfulness
+   review_url <- paste0(full_movielink, "reviews")
+   reviewpage <- read_html(review_url[1])
+   review_text <- html_nodes(reviewpage, ".text")  %>% html_text
+   review_helpfulness <- html_nodes(reviewpage, ".text-muted") %>%    html_text %>% str_extract_all("(\\d,)?\\d+") %>% unlist %>%    parse_number
+   length(review_helpfulness) <- 50
+   help_combined <- matrix(review_helpfulness, ncol = 2, byrow = TRUE)
+   hratios <- help_combined[,1] / help_combined[,2]
+#Budget
+budget_url <- paste0(full_movielink, "?ref_=adv_li_tt")
+budgetlink <- read_html(budget_url[1])
+movie_budget <- html_nodes(budgetlink,"#titleDetails .txt-block:nth-child(12)")
+movie_budget <- html_text(movie_budget, trim = TRUE)
+if(length(movie_budget)==0) movie_budget <- NA
+} 
+```
+
+```{r} 
+#Arbitrary url function
+moviefunction <- function(url){
+   h <- read_html(url)
+   url[i] <- str_c(url,(i-1)*50+1 ,"&ref_=adv_nxt", sep="")
+   everything <- html_nodes(h,".ratings-imdb-rating strong", ".text-muted.unbold", ".text-muted+ span", ".genre", ".lister-item-content .ghost+ a", "#titleDetails .txt-block:nth-child(12)") %>% html_text 
+   return(data.frame(everything)) # Cannot coerce function to be a data frame. 
+}
+```
+
+_Victory conditions:_ You have a data frame with 1000 rows and columns that contain the first six variables, as well as each genre, review, and review helpfulness scores in appropriately formatted columns. Columns have short but clear names. Most rows have no missing values; the few rows where there are missing values have NA in the appropriate places. 
+
+_Mercy condition:_ If you are struggling to get these data in a reasonable form, a compiled, reasonably clean and accurate version for either the URL list or movie data will be added to Canvas called `imdb_urls.csv` and `moviedata.Rdata` respectively.  Use them to answer the following parts, if necessary. Your work in this part, even if not complete, can be scored for partial credit.  
+
+```{r}
+library(datasets)
+mercy_imdburls <- read.csv("imdb_urls.csv")
+mercy_moviedata <- read.csv("moviedata.csv")
+```
+
+2. (30 pts) Write code to plot the distributions of the first five variables listed above. Make sure missing values, if any, are handled gracefully. Your plots should be appropriately labeled, titled, colored, etc. Comment on the features each plot presents -- what information is gained by seeing these graphics? 
+
+```{r}
+# Plotting packages 
+library(ggplot2)
+library(tidyverse)
+library(scales)
+library(lattice)
+library(dplyr)
+```
+
+```{r}
+# Ratings and Num Ratings 
+
+# Ratings 
+ratingshist <- histogram(mercy_moviedata$rating, plot.points = FALSE, xlab = "Movie Rating", ylab = "Proportion of Each Movie Rating (%)", main = "Movie Ratings Distribution", col = "yellow")
+ratingshist
+
+# Analysis of movie ratings
+rating <- (na.omit(mercy_moviedata$rating))
+if(length(rating)==0) {
+   rating <- NA
+}
+library(moments)
+skewness(rating) #1.008 
+kurtosis(rating) #4.411
+mean(rating) #7.95
+median(rating) #7.9
+min(rating) #7.6
+
+# Num Ratings 
+num_ratings <- (na.omit(mercy_moviedata$num_ratings))
+if(length(num_ratings)==0) {
+   num_ratings <- NA
+}
+numrathist <- histogram(mercy_moviedata$num_ratings, plot.points = FALSE, xlab = "Total Number of Ratings", ylab = "Percent of Total", main = "Proportion of Number of Ratings", col = "blue",xlim = range(0, 1000000))
+numrathist
+
+# Histogram analysis for num_ratings
+skewness(num_ratings) #2.29
+kurtosis(num_ratings) #9.85
+mean(num_ratings) #27626.5
+median(num_ratings) #139808
+
+# Num Ratings and Ratings Distribution Combined 
+ratingsplot <- mercy_moviedata %>% 
+   ggplot(aes(num_ratings, rating)) +
+   geom_bin2d() +
+   scale_y_continuous(breaks = 1:10) +
+   scale_x_log10(labels = comma) +
+   scale_fill_viridis_c(labels = comma, name = "Scale (Count)") +
+   xlab("Number of Ratings") +
+   ylab("Rating") +
+   labs(title = "Total Movie Ratings by Total Votes") +
+   theme_minimal()
+ratingsplot
+```
+We can discuss the above three plots to learn about the distributions of ratings, number of ratings, and can also explore how they relate to one another. The yellow-colored histogram titled "Movie Ratings Distribution" displays the percentage of each movie rating that is present in the IMDB movie data set. We see that the most common movie ratings are between 7.5 and 8, with a few outliers between about 8.5 and 10. This makes sense as we calculated the median for rating to be 7.9 and the mean, while closer to the skewed tail, falls at 7.95. This plot, while NOT adjusted in the x or y direction, also shows us that IMDB does not allow or present any ratings that are less than 7.6- at least in the top 999 movies as confirmed by our minimum rating calculation of 7.6. Our skewness for the ratings distribution histogram has a value of approximately 1, which is not close to zero but we can conclude that the data is somewhat representative of a normal distribution with a slight right-skew. Secondly, we can also look at the comparison between the movie rating and the total number of votes in the second plot entitled "Total Movie Ratings by Total Votes". This is a scatter plot where darker colored blocks indicate where the data is less concentrated (possibly outliers) and lighter colored blocks are where we see "more data". Specifically, this plot shows that the number of ratings (or total number of votes) falls between the 30,000-400,000 range which correspond to ratings at or just below a rating of 8. This idea matches what we saw in the first yellow histogram Movie Ratings Distribution plot, which says that the most common ratings (as % of total) are around 8. Further, the royal blue histogram titled "Proportion of Number of Ratings" displays the distribution of the total number of ratings that were completed for each movie, as each movie is associated with a different number of movie ratings. This plot shows That the most common total number of ratings falls near 200,000, which is consistent with the scatter plot "Total Movie Ratings by Total Votes" that shows how most of the data is concentrated where there are more votes in total (the light green/yellow blocks in the comparison plot).
+
+```{r}
+# Genres
+count(mercy_moviedata, vars=genres) 
+# Split up genres into separate columns
+genres <- as.character(mercy_moviedata$genres) 
+genres <- gsub(pattern="\\s", replacement = "", genres)
+genres <- strsplit(genres, "\\,") %>% unlist(genres)
+genre_counts <- table(genres)
+genres
+# Plot that shows the probability of each genre of movie in the data set
+genredist <- ggplot() + 
+   geom_bar(aes(genres)) + 
+   coord_flip() + 
+   xlab("Movie Genre") + 
+   ylab("Count") + 
+   ggtitle("Presence of Each Movie Genre") + 
+   theme_light()
+genredist 
+```
+The graphic, entitled Count of Each Movie Genre, displays the amount of each movie genre present in the IMDB data set. From this, we can see that the most common movie genre for IMDB's top 999 movies is "Drama" at a count of over 700, while most other genres have counts in the 50 to 200 range. Some other common movie genres that fall into the top 999 movies on IMDB include: "Thriller", "Comedy", "Crime", "Action" and "Adventure". 
+
+```{r}
+# Gross Revenue Distributions
+gross <- (na.omit(mercy_moviedata$gross))
+if(length(gross)==0) {
+   gross <- NA
+}
+histogram(mercy_moviedata$gross, plot.points = FALSE, xlab = "Gross Revenue ($)", ylab = "Distribution of Gross Revenue", main = "IMDB Gross Revenue", col = "purple")
+
+# Test for skewness
+install.packages("moments")
+library(moments)
+skewness(gross) #2.684, not very close to zero, lack of symmetry in general
+kurtosis(gross) #12.961, much larger than 3 
+
+# Revenue vs Rating plot- zoomed in on the cluster of data that generated lower revenue, quick comparison to rating.
+grossplot <- mercy_moviedata %>%
+   ggplot(aes(gross, rating)) +
+   geom_jitter() + # since x and y are both discrete
+   xlim(c(0, 5.0e+07)) +
+   xlab("Revenue") +
+   ylab("Rating") +
+   labs(title = "Movie Ratings by Gross Revenue") +
+   theme_minimal()
+grossplot
+```
+The purple-colored histogram for the gross amount of revenue generated for IMDB's top 999 movies is heavily right-skewed. This means that there is a greater density of movies with a low revenue, and only a few movies with high revenue that would skew the mean gross revenue to be higher than the median gross revenue. When we test to confirm our conclusions, a skewness value of 2.81 (not close to zero) and a kurtosis value of 12.96 (well above 3) also suggest that much of the data lies in the tails and does not follow a normal distribution. This means that there are outliers in the right tail of the density graph. Further, when comparing revenue to movie rating in the scatter plot, we can see that there were in fact several movies that generated zero gross revenue, and still had ratings between 7.5 and 8.75. The commonality of movies generating little to no revenue despite a variety of ratings is a reason for why our data is skewed to the right, as there are only a few movies that generate a large, profitable amount of revenue. Thus, those movies are likely rated highly as well. Movies that generate exceptionally high revenue will also generate a higher number of ratings and higher rating values- these constitute many of our outliers.  
+
+```{r}
+# Budget 
+budget <- (na.omit(mercy_moviedata$budget))
+if(length(budget) == 0) {
+   budget <- NA
+}
+budget <- as.numeric(mercy_moviedata$budget)
+budget_count <- table(budget)
+par(mfrow = c(2,3)) # Do I need this?
+budget1 <- densityplot(as.numeric(mercy_moviedata$budget), xlab = "Movie Budget ($)", ylab = "Density Distribution", main = "Budget Density Distribution", xlim = range(0, 5.0e+08), col = "red") 
+budget1
+budget2 <- densityplot(as.numeric(mercy_moviedata$budget), xlab = "Movie Budget ($)", ylab = "Density Distribution", main = "Budget Density Distribution (Zoomed)", xlim = range(0, 2.0e+05), col = "red") 
+budget2
+```
+In the the above distribution plot there is an obvious right-skew to the data. The red line is representative of the density, so we can identify the most common movie budgets in the data set. We see the highest density for lower movie budgets. The second plot called "Budget Density Distribution (Zoomed)" is the same as the first density plot, but we can confirm that there is a higher abundance of  movie budgets closest to the origin and that the more common movie budgets fall in the 50,000 to 200,000 dollar range (approximately). The first plot is more descriptive, however, because we mainly want to look at the density line that is highest at lower movie budgets in general, in addition to a few outliers above the budget of about $2e+08, or 200 million dollars.
+
+```{r}
+# Release Year 
+year <- mercy_moviedata$year
+yeardist <- ggplot() +
+   geom_bar(aes(year)) +
+   xlab("Year") + 
+   ylab("Count") + 
+   ggtitle("Amount of IMDB Movies in Each Release Year") 
+yeardist
+
+# Release Year vs Ratings
+yearplot <- mercy_moviedata %>%
+   ggplot(aes(year, rating)) +
+   geom_bin2d() + # Continuous bivariate distribution for year against rating
+   scale_y_continuous(breaks = 1:10) +
+   scale_x_continuous() +
+   scale_fill_viridis_c(name = "Scale (Count)") + 
+   xlab("Year") +
+   ylab("Rating") +
+   labs(title = "Movie Ratings by Year") +
+   theme_minimal()
+yearplot
+# Find R^2 to see the percent change in y as a result of x (meaning the change in rating over time in years) 
+corryearplot = lm(rating ~ year, data = mercy_moviedata)
+summary(corryearplot)$r.squared # The coefficient of determination =  0.016 indicating that the red regression line is highly unrepresentative of the relationship between year and movie rating. Hence why we do not use a trend line. 
+```
+The plot "Amount of IMDB Movies in Each Release Year" shows the count of movies associated with each year of release. Overtime, we can see that the amount of movies released in each year (within the data set) is increasing, meaning our data is left-skewed resulting in a dominance of more recent movies. It makes sense that more recent movies fall into IMDB's top 999 rated movies, as the movies themselves are more familiar to viewers. We see the residual effects of this skewness in plots such as the second scatter plot in this section called "Movie Ratings by Year" in which most of the data is concentrated (light green/yellow blocks) for more recent movies. The colorful scatter plot shows a minimal increase in ratings of movies over time and confirms that we have more movies being released in more recent years. I tested to see if a regression line would show anything about the trends in ratings over time, but as ratings are dominated heavily by more recent movies, a fit line was unrepresentative of the data, so I chose not to include it in the counts of release years plot nor the other scatter plot.  
+
+3. (20 pts) Complete a sentiment analyses on the 25 most helpful reviews for each movie. The choice of lexicon is up to you, but explain your reasons why your choice is the most reasonable/appropriate option. Add a summary of this information to your original data frame. 
+
+```{r}
+# Sentiment analysis
+library(tidytext)
+library(textdata)
+get_sentiments(lexicon = "bing") 
+# Inspect review 1, apply to reviews 1-25
+glimpse(mercy_moviedata$Review_1)
+review_stuff <- mercy_moviedata %>% 
+   select(title, Review_1:Review_25)
+head(review_stuff) # just have titles and their reviews
+
+#Find common words, eliminate words that are uninformative, detect and take out certain punctuation if they exist. Note: only for review 1. 
+filtered_review_text <- review_stuff %>% 
+   unnest_tokens(word, Review_1) %>% filter(!word %in% stop_words$word &
+          !str_detect(word, "^\\d+$")) %>%
+  mutate(word = str_replace(word, "^'", ""))
+
+# Select bing lexicon and join it to the words in the reviews
+bing <- get_sentiments("bing") %>% 
+   select(word, sentiment) 
+bing # Set of lexicon words that will be joined to review text
+
+# Join words from filtered review text and bing lexicon
+filtered_review_text <- filtered_review_text %>% inner_join(bing, by = "word") %>% select(word, sentiment)
+
+# Replace missing (na) values with none
+filtered_review_text <- filtered_review_text %>%
+  mutate(sentiment = replace_na(sentiment, replace = "none")) 
+
+# This shows each word in the review as a positive or negative word
+filtered_review_text 
+
+# Sentiment counts
+sentiment_counts <- filtered_review_text %>%
+  left_join(bing, by = "word")
+sentiment_counts <- filtered_review_text %>%
+    count(word, sentiment) 
+sentiment_counts #this displays the count (n) of each sentiment
+
+# Positive negative plot
+sentplot <- filtered_review_text %>%
+   ggplot() +
+   geom_bar(aes(sentiment)) + 
+   ggtitle("Count of Positive vs Negative Sentiment Words") + 
+   xlab("Sentiment") + 
+   ylab("Count") + 
+   theme_light() 
+sentplot
+
+library(SentimentAnalysis)
+??SentimentAnlysis # Looked at code demonstrations from R package 
+sent <- analyzeSentiment(filtered_review_text$sentiment)
+sent #This is a numerical analysis of the sentiments ?
+```
+In this section, the first thing I did was inspected the review text to see the form in which it first existed, and wanted to combine all of the reviews into a data frame along with the movie title. This is what I assigned to review_stuff. Next, I found the more common sentiment words in our data, eliminated words that are uninformative (stop words) and then detected and took out certain confusing characters and symbols that were in the reviews' text, replacing them with "" instead. This was tricky to do for all reviews at the same time, so I only created "filtered_review_text" but it should be noted that this only has to do with Review_1. Next, I selected the lexicon "bing" because it is more of a general representation of positive and negative sentiments. Beucase "bing" is binary, I though that later on it would be cool to assign positive and negative to 0 and 1, and then could run other statistical analyses- however, I did not get to that point, but it would be interesting to look at at some point. I thought that using bing would best analyze the general nature of the 25 most helpful reviews, and I knew that the counts of positives vs negatives would be both descriptive and concise. If we found that there was an excessive amount of negative sentiment words in the 25 most helpful reviews, it is likely that viewers were only leaving reviews when they were displeased by the movie, or that the 999 IMDB's top movies were just disliked in general. That is not the case, and the sentiments seemed relatively balanced from the information I gathered. I was able to generate sentiment counts, and found that there are slightly more positive counts than negative counts, but they are very similar. The probability of a positive sentiment occurring in filtered_review_text is nearly equivalent to that of negatives, but is slightly more likely. We can conclude that movie viewers create these IMDB reviews fueled by both positive and negative emotions, and are not merely going to IMDB to leave a movie review feeling particularly one way or another.
+
+```{r}
+#Exploration of sentiment analysis with r package (using unfiltered data, so not very accurate) 
+
+#Do this for one review first, then could apply to all 25 eventually
+sentiment <- analyzeSentiment(mercy_moviedata$Review_1)
+sentiment 
+compareToResponse(sentiment, mercy_moviedata$rating) 
+
+#Plot sentiment responses involving movie rating and a new dictionary
+plotSentimentResponse(sentiment$SentimentGI, mercy_moviedata$rating)
+dictionary <- generateDictionary(mercy_moviedata$Review_1, mercy_moviedata$rating)
+summary(dictionary) # not entirely sure how to interpret
+
+# Inspect and add "dictionary" to the data frame 
+sentimentinfo <- c(summary(dictionary))
+mercy_moviedata$sentimentinfo <- sentimentinfo
+summary(sentimentinfo)
+# Use cbind(mercy_moviedata, sentimentinfo) 
+
+# Plot for Review_1 - this is the idea that we want for all reviews if we are looking at sentiment vs response - this is interesting
+new_dict <- predict(dictionary, mercy_moviedata$Review_1)
+rev1 <- plotSentimentResponse(new_dict, mercy_moviedata$rating)
+rev1 # This shows the trend in sentiment for the first review 
+
+# Compare data from our dictionary of words for review 1 
+abc <- compareToResponse(new_dict, mercy_moviedata$rating)
+def <- compareToResponse(sentiment, mercy_moviedata$rating)
+abc
+def
+```
+
+4. (20 pts) Variable Relationships. Create one plot that displays the relationship (or lack thereof) between any of the movie variables. Your plot should be appropriately labeled, titled, colored, etc. Your plot should display at minimum 3 variables. A plot with more variables included will be scored more favorably (as long as the plot is reasonable and legible). Reviews and helpfulness/sentiment scores are considered aggregate variables (e.g., 25 helpfulness scores will be considered a single variable). Some questions that you might consider when creating your plot are below, though you are not limited to these questions. 
+   - Is there any evidence of a relationship between review helpfulness and review sentiment? 
+   - Do the review scores (from the most helpful reviews) generally agree with the overall IMDB average rating?
+   - Is there evidence of a relationship between average IMDB rating and a movie's gross? Does release year seem to have an effect on this relationship?
+   - Is there evidence of a relationship between a movie's budget and a movie's gross? Does release year seem to have an effect on this relationship? 
+   - Do any actors have an effect (positive or negative) on the relationship between budget, gross, or average IMDB rating? Is this pattern common across any genres? 
+   
+```{r}
+# Budget and Revenue Plot
+budgrevplot <- mercy_moviedata %>% 
+   ggplot(aes(gross, budget)) +
+   geom_point(aes(color = rating), alpha = .5) +
+   xlim(c(0, 4.5e+08)) +
+   ylim(c(0, 7.5e+08)) +
+   geom_smooth(color = "black") +
+   labs(color="Rating Gradient") +
+   xlab("Movie Revenue") + ylab("Movie Budget") +
+   labs(title = "Gross Revenue vs Budget") +
+   theme_minimal() 
+budgrevplot
+```
+This plot displays the relationship between movie revenue and movie budget. Upon first glance, it seems like there could be a slight positive relationship such that as movie budget increases, then movie revenue increases- to be discussed later on in this section. The blue color gradient of the plot is representative of movie rating. From previous work, we know that the ratings in our data set fall between 7.6 and 10 approximately. Lower rating values are represented by darker blue points and higher ratings represented by lighter blue points. Even with transparency adjustments, we can see that darker colors (lower ratings) dominate the data itself, and there are only a few very high ratings (light blue points) among the mix of movie ratings. It should be noted that since many of our variables are skewed one way or another (as displayed in problem 2), we expect the color scale to be predominatley lighter or darker no matter which variable we choose to look at in the color gradient, so the dominance of darker blue colors still makes sense given that the movie ratings data is right-skewed, even though it is less descriptive than if we had a more normal distribution of movie ratings. 
+
+One interesting component of this plot is that when we look at a movie revenue of 0, farthest left on the x axis, there are about 11 points that have a notably high movie budget. This means that we have some movies in the data set where a higher amount of money was spent creating the movie, but it did not generate a high revenue. Interestingly, those points are all for movies that have higher ratings as they are lighter shades of blue. This means that there are likely a few high budget, but low revenue, films that were liked by viewers and made it into IMDB's top 999 movies despite that the producers did not profit at all. 
+
+Another component of this plot that we can analyze is the large cluster of points near the origin, meaning an extremely low movie budget and an extremely low revenue. This corner of the graph is very dark, so we can associate low budget with low revenue and low movie ratings which makes sense. 
+
+We can gather even more information about this plot if we zoom in on both axes and discount the outliers mentioned previously. 
+
+```{r}
+# Budget and Revenue Plot
+budgrevplot2 <- mercy_moviedata %>% 
+   ggplot(aes(gross, budget)) +
+   geom_point(aes(color = rating)) +
+   labs(color="Rating Gradient") +
+   xlim(c(0, 4.0e+07)) +
+   ylim(c(0, 2.0e+07)) +
+   geom_smooth(color = "black") +
+   xlab("Movie Revenue") + ylab("Movie Budget") +
+   labs(title = "Gross Revenue vs Budget") +
+   theme_minimal() 
+budgrevplot2
+#Analyze fit line
+budgrevplot2 = lm(gross ~ budget, data = mercy_moviedata)
+summary(budgrevplot2)$r.squared #0.0033
+```
+Here, the fit line and points with less transparency tells us a similar but more detailed story in the region where the data is most concentrated. When completing a regression analysis, the black fit line actually represents almost none of our data, as the r squared value is 0.0033. This indicates that the model explains none of the variability of the data. The low r squared value in addition to a random-looking scatter of points explains to us that there is a lack of a relationship between gross revenue and the movie's budget overall, in addition to the fact that "lower" movie ratings are most common in the dataset, or that there are only a few movies with very good reviews which do not have a noticeable association with the movies' budget or revenue.  
